@@ -248,3 +248,7 @@ PRODUCT_COPY_FILES += \
 
 PRODUCT_PRODUCT_PROPERTIES += \
     persist.sys.ax_emoji_style=android
+
+# Smartspacer
+PRODUCT_PACKAGES += \
+    Smartspacer

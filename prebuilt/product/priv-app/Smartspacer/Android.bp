@@ -1,0 +1,24 @@
+android_app_import {
+    name: "Smartspacer",
+    apk: "Smartspacer.apk",
+    certificate: "platform",
+            product_specific: true,
+    privileged: true,
+    dex_preopt: {
+        enabled: false,
+    },
+    required: [
+        "privapp-permissions-smartspacer.xml",
+    ],
+    optional_uses_libs: [
+        "androidx.window.extensions",
+        "androidx.window.sidecar",
+    ],
+}
+
+prebuilt_etc {
+    name: "privapp-permissions-smartspacer.xml",
+    sub_dir: "permissions",
+    src: "privapp-permissions-smartspacer.xml",
+    product_specific: true,
+}
