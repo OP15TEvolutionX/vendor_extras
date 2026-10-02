@@ -1,0 +1,965 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index 45bacdc..74cb68c 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -7,14 +7,19 @@ plugins {
+     id 'com.google.android.libraries.mapsplatform.secrets-gradle-plugin'
+     id 'dev.rikka.tools.refine'
+     id 'com.google.protobuf'
+-    id 'com.google.gms.google-services'
+-    id 'com.google.firebase.crashlytics'
++    id 'com.google.gms.google-services' apply false
++    id 'com.google.firebase.crashlytics' apply false
+ }
+ 
++// Local ROM builds do not have the upstream Firebase project configuration.
++if (file('google-services.json').exists()) {
++    apply plugin: 'com.google.gms.google-services'
++    apply plugin: 'com.google.firebase.crashlytics'
++}
+ apply plugin: 'com.google.android.gms.oss-licenses-plugin'
+ 
+-def tagName = '1.11.3'
+-def tagCode = 1113
++def tagName = '9.99.99'
++def tagCode = 1000001
+ 
+ android {
+     compileSdkVersion 37
+@@ -27,6 +32,7 @@ android {
+         versionName tagName
+ 
+         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
++        buildConfigField "boolean", "APP_UPDATE_CHECK_ENABLED", "false"
+         buildConfigField "String", "TAG_NAME", "\"${tagName}\""
+     }
+ 
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index ce49077..8629263 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -34,6 +34,10 @@
+         android:name="android.permission.QUERY_ALL_PACKAGES"
+         tools:ignore="QueryAllPackagesPermission" />
+ 
++    <uses-permission android:name="android.permission.MANAGE_SMARTSPACE" />
++    <uses-permission android:name="android.permission.ACCESS_SMARTSPACE" />
++    <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" />
++    <uses-permission android:name="android.permission.REAL_GET_TASKS" />
+     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+     <uses-permission android:name="com.kieronquinn.app.smartspacer.permission.ACCESS_SMARTSPACER_TARGETS" />
+     <uses-permission android:name="com.kieronquinn.app.smartspacer.permission.ACCESS_SMARTSPACER_COMPLICATIONS" />
+@@ -72,6 +76,7 @@
+ 
+     <application
+         android:name=".Smartspacer"
++        android:persistent="true"
+         android:allowBackup="false"
+         android:dataExtractionRules="@xml/data_extraction_rules"
+         android:enableOnBackInvokedCallback="true"
+@@ -104,29 +109,12 @@
+                 android:resource="@xml/app_shortcuts" />
+         </activity>
+ 
+-        <activity
+-            android:name=".ui.activities.DummyHomeActivity"
+-            android:excludeFromRecents="true"
+-            android:exported="true"
+-            android:noHistory="true"
+-            android:theme="@style/Theme.Smartspacer">
+-            <intent-filter>
+-                <action android:name="android.intent.action.MAIN" />
+-
+-                <category android:name="android.intent.category.HOME" />
+-                <category android:name="android.intent.category.DEFAULT" />
+-            </intent-filter>
+-        </activity>
+ 
+         <activity
+             android:name=".ui.activities.permission.notification.NotificationPermissionActivity"
+             android:excludeFromRecents="true"
+             android:theme="@style/Theme.Smartspacer" />
+ 
+-        <activity
+-            android:name=".ui.activities.permission.accessibility.AccessibilityPermissionActivity"
+-            android:excludeFromRecents="true"
+-            android:theme="@style/Theme.Smartspacer" />
+ 
+         <activity
+             android:name=".ui.activities.permission.sms.SmsPermissionActivity"
+@@ -915,20 +903,6 @@
+             android:noHistory="true"
+             android:theme="@style/Theme.Smartspacer.Transparent"/>
+ 
+-        <service
+-            android:name="com.kieronquinn.app.smartspacer.service.SmartspacerAccessibiltyService"
+-            android:exported="true"
+-            android:foregroundServiceType="specialUse"
+-            android:label="@string/accessibility_service_label"
+-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+-            <intent-filter>
+-                <action android:name="android.accessibilityservice.AccessibilityService" />
+-            </intent-filter>
+-
+-            <meta-data
+-                android:name="android.accessibilityservice"
+-                android:resource="@xml/accessibilityservice" />
+-        </service>
+ 
+         <service
+             android:name=".service.SmartspacerManagerService"
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/Smartspacer.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/Smartspacer.kt
+index fc66395..b5be051 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/Smartspacer.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/Smartspacer.kt
+@@ -382,7 +382,7 @@ class Smartspacer: Application(), Configuration.Provider {
+         single { SmartspacerDatabase.getDatabase(get()) }
+         single<WidgetRepository> { WidgetRepositoryImpl(get(), get()) }
+         single<GrantRepository>(createdAtStart = true) { GrantRepositoryImpl(get()) }
+-        single<AccessibilityRepository> { AccessibilityRepositoryImpl() }
++        single<AccessibilityRepository> { AccessibilityRepositoryImpl(get()) }
+         single<GoogleWeatherRepository> { GoogleWeatherRepositoryImpl() }
+         single<AtAGlanceRepository> { AtAGlanceRepositoryImpl() }
+         single<CompatibilityRepository>(createdAtStart = true) { CompatibilityRepositoryImpl(get(), get(), get(), get(), get()) }
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/components/smartspace/SmartspacerSmartspaceManager.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/components/smartspace/SmartspacerSmartspaceManager.kt
+index 2f4002b..3e88d71 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/components/smartspace/SmartspacerSmartspaceManager.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/components/smartspace/SmartspacerSmartspaceManager.kt
+@@ -5,11 +5,13 @@ import android.app.smartspace.SmartspaceConfig
+ import android.app.smartspace.SmartspaceSessionId
+ import android.app.smartspace.SmartspaceTarget
+ import android.content.ComponentName
++import android.content.pm.PackageManager
+ import android.content.Context
+ import android.content.Intent
+ import android.content.ServiceConnection
+ import android.os.DeadObjectException
+ import android.os.IBinder
++import android.util.Log
+ import android.service.smartspace.ISmartspaceService
+ import com.kieronquinn.app.smartspacer.ISmartspacerShizukuService
+ import com.kieronquinn.app.smartspacer.components.smartspace.SmartspaceSession.OnTargetsAvailableListener
+@@ -21,6 +23,9 @@ import com.kieronquinn.app.smartspacer.utils.extensions.getIApplicationThread
+ import com.kieronquinn.app.smartspacer.utils.extensions.getMainThreadHandler
+ import com.kieronquinn.app.smartspacer.utils.extensions.getServiceDispatcher
+ import com.kieronquinn.app.smartspacer.utils.extensions.suspendCoroutineWithTimeout
++import kotlinx.coroutines.MainScope
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
+ import kotlinx.coroutines.sync.Mutex
+ import kotlinx.coroutines.sync.withLock
+ import org.koin.core.component.KoinComponent
+@@ -41,7 +46,34 @@ class SmartspacerSmartspaceManager(private val context: Context): KoinComponent
+     private val shizuku by inject<ShizukuServiceRepository>()
+     private val systemSmartspaceRepository by inject<SystemSmartspaceRepository>()
+ 
+-    private val serviceIntent = context.getDefaultSmartspaceComponent()?.let {
++    // The ROM routes launcher sessions to Smartspacer. Incoming Google targets must
++    // bind to ASI directly, never to that same overridden component.
++    private val upstreamComponent = context.getDefaultSmartspaceComponent()?.let {
++        if (it.packageName == context.packageName) {
++            ComponentName(
++                "com.google.android.as",
++                "com.google.android.apps.miphone.aiai.app.AiAiSmartspaceService"
++            )
++        } else it
++    }?.takeIf {
++        try {
++            context.packageManager.getServiceInfo(it, 0).enabled &&
++                context.packageManager.getApplicationInfo(it.packageName, 0).enabled
++        } catch (_: PackageManager.NameNotFoundException) {
++            false
++        }
++    }
++
++    private val isPrivileged = context.checkSelfPermission(
++        "android.permission.MANAGE_SMARTSPACE"
++    ) == PackageManager.PERMISSION_GRANTED
++
++    private val nativeScope = MainScope()
++    private val nativeSessions = mutableListOf<SmartspaceSession>()
++    private var nativeConnection: ServiceConnection? = null
++    private var targetsCallback: ((UiSurface, List<SmartspaceTarget>) -> Unit)? = null
++
++    private val serviceIntent = upstreamComponent?.let {
+         Intent("android.service.smartspace.SmartspaceService").apply {
+             component = it
+         }
+@@ -70,6 +102,11 @@ class SmartspacerSmartspaceManager(private val context: Context): KoinComponent
+     suspend fun createSmartspaceSessions(
+         onTargetsAvailable: (surface: UiSurface, targets: List<SmartspaceTarget>) -> Unit
+     ) {
++        if (isPrivileged) {
++            targetsCallback = onTargetsAvailable
++            bindNativeService()
++            return
++        }
+         shizuku.runWithService {
+             it.runWithServiceLocked {
+                 UiSurface.entries.forEach { surface ->
+@@ -86,18 +123,80 @@ class SmartspacerSmartspaceManager(private val context: Context): KoinComponent
+         }
+     }
+ 
++    private fun bindNativeService() {
++        val intent = serviceIntent ?: return
++        if (nativeConnection != null) return
++        val connection = object : ServiceConnection {
++            override fun onServiceConnected(name: ComponentName, binder: IBinder) {
++                val upstream = ISmartspaceService.Stub.asInterface(binder)
++                service = upstream
++                nativeSessions.clear()
++                val callback = targetsCallback ?: return
++                UiSurface.entries.forEach { surface ->
++                    val config = SmartspaceConfig.Builder(context, surface.surface)
++                        .setSmartspaceTargetCount(5)
++                        .build()
++                    nativeSessions += SmartspaceSession(upstream, context, config).apply {
++                        addOnTargetsAvailableListener(executor, createCallback(surface, callback))
++                    }
++                }
++                Log.i("SmartspacerUpstream", "Connected to $name; created ${nativeSessions.size} sessions")
++            }
++
++            override fun onServiceDisconnected(name: ComponentName?) {
++                // Android retains the binding and calls onServiceConnected after ASI restarts.
++                service = null
++                nativeSessions.clear()
++            }
++
++            override fun onBindingDied(name: ComponentName?) {
++                reconnect()
++            }
++
++            override fun onNullBinding(name: ComponentName?) {
++                reconnect()
++            }
++
++            private fun reconnect() {
++                context.unbindService(this)
++                nativeConnection = null
++                service = null
++                nativeSessions.clear()
++                nativeScope.launch {
++                    delay(2500L)
++                    bindNativeService()
++                }
++            }
++        }
++        nativeConnection = connection
++        try {
++            if (!context.bindService(intent, connection, Context.BIND_AUTO_CREATE)) {
++                nativeConnection = null
++                Log.w("SmartspacerUpstream", "Unable to bind to ${intent.component}")
++            }
++        } catch (e: SecurityException) {
++            nativeConnection = null
++            Log.e("SmartspacerUpstream", "Permission denied binding to ${intent.component}", e)
++        }
++    }
++
+     private fun createCallback(
+         surface: UiSurface,
+         callback: (surface: UiSurface, targets: List<SmartspaceTarget>) -> Unit
+     ): OnTargetsAvailableListener {
+         return object: OnTargetsAvailableListener {
+             override fun onTargetsAvailable(targets: List<SmartspaceTarget?>) {
++                Log.i("SmartspacerUpstream", "${surface.surface}: ${targets.size} Google targets")
+                 callback(surface, targets.filterNotNull())
+             }
+         }
+     }
+ 
+     suspend fun destroySmartspaceSession(sessionId: SmartspaceSessionId) {
++        if (isPrivileged) {
++            // These IDs belong to outgoing launcher sessions, not our direct ASI sessions.
++            return
++        }
+         shizuku.runWithService {
+             it.runWithServiceLocked {
+                 onDestroySmartspaceSession(sessionId)
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/model/settings/SettingsItem.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/model/settings/SettingsItem.kt
+index 4038d89..20ac65f 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/model/settings/SettingsItem.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/model/settings/SettingsItem.kt
+@@ -37,7 +37,8 @@ sealed class GenericSettingsItem(val type: GenericSettingsItemType): BaseSetting
+     data class Switch(
+         val enabled: Boolean,
+         val text: CharSequence,
+-        val onChanged: (checked: Boolean) -> Unit
++        val onChanged: (checked: Boolean) -> Unit,
++        val isEnabled: Boolean = true
+     ): GenericSettingsItem(GenericSettingsItemType.SWITCH)
+ 
+     data class Setting(
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/receivers/BootReceiver.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/receivers/BootReceiver.kt
+index 7553383..6be1ea8 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/receivers/BootReceiver.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/receivers/BootReceiver.kt
+@@ -3,6 +3,8 @@ package com.kieronquinn.app.smartspacer.receivers
+ import android.content.BroadcastReceiver
+ import android.content.Context
+ import android.content.Intent
++import com.kieronquinn.app.smartspacer.service.SmartspacerBackgroundService
++import com.kieronquinn.app.smartspacer.utils.extensions.isRomBackgroundManaged
+ import com.kieronquinn.app.smartspacer.repositories.SystemSmartspaceRepository
+ import org.koin.core.component.KoinComponent
+ import org.koin.core.component.inject
+@@ -12,6 +14,9 @@ class BootReceiver: BroadcastReceiver(), KoinComponent {
+     private val systemSmartspaceRepository by inject<SystemSmartspaceRepository>()
+ 
+     override fun onReceive(context: Context, intent: Intent) {
++        if (context.isRomBackgroundManaged()) {
++            SmartspacerBackgroundService.startServiceIfNeeded(context)
++        }
+         systemSmartspaceRepository.showNativeStartReminderIfNeeded()
+     }
+ 
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/AccessibilityRepository.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/AccessibilityRepository.kt
+index 1e39f09..0da02fc 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/AccessibilityRepository.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/AccessibilityRepository.kt
+@@ -1,5 +1,14 @@
+ package com.kieronquinn.app.smartspacer.repositories
+ 
++import android.content.Context
++import android.app.IActivityTaskManager
++import android.os.ServiceManager
++import android.util.Log
++import com.kieronquinn.app.smartspacer.utils.extensions.getForegroundPackage
++import com.kieronquinn.app.smartspacer.utils.extensions.isRomBackgroundManaged
++import kotlinx.coroutines.MainScope
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.flow.catch
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.StateFlow
+ 
+@@ -11,10 +20,23 @@ interface AccessibilityRepository {
+ 
+ }
+ 
+-class AccessibilityRepositoryImpl: AccessibilityRepository {
++class AccessibilityRepositoryImpl(private val context: Context): AccessibilityRepository {
+ 
+     override val foregroundPackage = MutableStateFlow("")
+ 
++    init {
++        if (context.isRomBackgroundManaged()) {
++            MainScope().launch {
++                val manager = IActivityTaskManager.Stub.asInterface(
++                    ServiceManager.getService("activity_task")
++                )
++                manager.getForegroundPackage().catch {
++                    Log.e("SmartspacerTasks", "Unable to monitor foreground task", it)
++                }.collect { foregroundPackage.emit(it) }
++            }
++        }
++    }
++
+     override suspend fun setForegroundPackage(foregroundPackage: String) {
+         this.foregroundPackage.emit(foregroundPackage)
+     }
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/AnalyticsRepository.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/AnalyticsRepository.kt
+index 5d2901f..8f37f39 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/AnalyticsRepository.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/AnalyticsRepository.kt
+@@ -2,6 +2,7 @@ package com.kieronquinn.app.smartspacer.repositories
+ 
+ import android.content.Context
+ import android.os.Build
++import com.google.firebase.FirebaseApp
+ import com.google.firebase.analytics.FirebaseAnalytics
+ import com.google.firebase.crashlytics.FirebaseCrashlytics
+ import com.google.firebase.crashlytics.setCustomKeys
+@@ -23,6 +24,7 @@ class AnalyticsRepositoryImpl(
+     private val scope = MainScope()
+ 
+     private fun setupState() = scope.launch {
++        if (FirebaseApp.getApps(context).isEmpty()) return@launch
+         settingsRepository.analyticsEnabled.asFlow().collect {
+             FirebaseAnalytics.getInstance(context).setAnalyticsCollectionEnabled(it)
+             FirebaseCrashlytics.getInstance().apply {
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/ShizukuServiceRepository.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/ShizukuServiceRepository.kt
+index c015ef7..2b1fbb8 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/ShizukuServiceRepository.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/ShizukuServiceRepository.kt
+@@ -163,27 +163,13 @@ class ShizukuServiceRepositoryImpl(
+         Shizuku.pingBinder()
+     }.stateIn(scope, SharingStarted.Eagerly, Shizuku.pingBinder())
+ 
+-    override val isReady = combine(
+-        settingsRepository.enhancedMode.asFlow(),
+-        binderReady
+-    ) { enabled, _ ->
+-        if(!enabled) return@combine false
+-        assertReady()
+-    }.onEach {
+-        if(it){
+-            systemSmartspaceRepository.showNativeStartReminderIfNeeded()
+-            updateUsernameIfNeeded()
+-            //Start the service if required
+-            getService()
+-        }
++    override val isReady = kotlinx.coroutines.flow.flow {
++        settingsRepository.enhancedMode.set(true)
++        emit(true)
+     }.stateIn(scope, SharingStarted.Eagerly, false)
+ 
+     override suspend fun assertReady(): Boolean {
+-        val rawResult = runWithService {
+-            it.ping()
+-        }
+-        val result = rawResult.unwrap()
+-        return result == true
++        return true
+     }
+ 
+     override suspend fun <T> runWithService(
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/SmartspacerSettingsRepository.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/SmartspacerSettingsRepository.kt
+index 9be2db7..3c0a259 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/SmartspacerSettingsRepository.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/SmartspacerSettingsRepository.kt
+@@ -410,7 +410,7 @@ class SmartspacerSettingsRepositoryImpl(
+         private const val DEFAULT_IS_RESTRICTED_MODE_DISABLED = false
+ 
+         private const val KEY_ENHANCED_MODE = "enhanced_mode"
+-        private const val DEFAULT_ENHANCED_MODE = false
++        private const val DEFAULT_ENHANCED_MODE = true
+ 
+         private const val KEY_HAS_USED_NATIVE_MODE = "has_used_native_mode"
+         private const val DEFAULT_HAS_USED_NATIVE_MODE = false
+@@ -491,7 +491,7 @@ class SmartspacerSettingsRepositoryImpl(
+         private const val DEFAULT_OEM_HIDE_INCOMPATIBLE = false
+ 
+         private const val KEY_UPDATE_CHECK_ENABLED = "update_check_enabled"
+-        private const val DEFAULT_UPDATE_CHECK_ENABLED = true
++        private const val DEFAULT_UPDATE_CHECK_ENABLED = false
+ 
+         private const val KEY_PLUGIN_REPOSITORY_ENABLED = "plugin_repository_enabled"
+         private const val DEFAULT_PLUGIN_REPOSITORY_ENABLED = true
+@@ -685,6 +685,7 @@ class SmartspacerSettingsRepositoryImpl(
+ 
+     init {
+         upgradePrefsIfRequired()
++        enhancedMode.setSync(true)
+     }
+ 
+ }
+\ No newline at end of file
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/SystemSmartspaceRepository.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/SystemSmartspaceRepository.kt
+index dcd4810..fde71e7 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/SystemSmartspaceRepository.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/SystemSmartspaceRepository.kt
+@@ -180,7 +180,7 @@ class SystemSmartspaceRepositoryImpl(
+         SmartspacerSmartspaceManager(context)
+     }
+ 
+-    override val serviceRunning = MutableStateFlow(false)
++    override val serviceRunning = MutableStateFlow(true)
+ 
+     override val homeTargets = combine(
+         _homeTargets.asStateFlow(),
+@@ -248,11 +248,7 @@ class SystemSmartspaceRepositoryImpl(
+         if(smartspaceManager.isAvailable) {
+             smartspaceManager.createSmartspaceSessions { surface, targets ->
+                 scope.launch(Dispatchers.IO) {
+-                    val converted = if (surface == UiSurface.HOMESCREEN) {
+-                        targets.map { target -> target.toSmartspaceTarget() }
+-                    } else {
+-                        targets.map { target -> target.toSmartspaceTarget() }
+-                    }
++                    val converted = targets.map { target -> target.toSmartspaceTarget() }
+                     when(surface) {
+                         UiSurface.HOMESCREEN -> _homeTargets.emit(converted)
+                         UiSurface.LOCKSCREEN -> _lockTargets.emit(converted)
+@@ -288,38 +284,13 @@ class SystemSmartspaceRepositoryImpl(
+     }
+ 
+     override suspend fun setService(): Boolean {
+-        return withContext(Dispatchers.IO) {
+-            shizuku.runWithService {
+-                val killPackages = getLaunchersToKill()
+-                it.setSmartspaceService(
+-                    SmartspacerSmartspaceService.COMPONENT, user, true, killPackages
+-                )
+-            } is ShizukuServiceResponse.Success
+-        }
++        serviceRunning.emit(true)
++        return true
+     }
+ 
+     override suspend fun resetService(onlyIfAvailable: Boolean, killSystemUi: Boolean): Boolean {
+-        return withContext(Dispatchers.IO){
+-            val default = context.getDefaultSmartspaceComponent()
+-            val killPackages = if(killSystemUi) {
+-                getLaunchersToKill()
+-            }else emptyList()
+-            val block = { service: ISmartspacerShizukuService ->
+-                if(default != null){
+-                    service.setSmartspaceService(default, user, killSystemUi, killPackages)
+-                }else{
+-                    service.clearSmartspaceService(user, killSystemUi, killPackages)
+-                }
+-            }
+-            val result = if(onlyIfAvailable){
+-                shizuku.runWithServiceIfAvailable(block)
+-            }else {
+-                shizuku.runWithService(block)
+-            } is ShizukuServiceResponse.Success
+-            serviceRunning.emit(false)
+-            setupService()
+-            result
+-        }
++        serviceRunning.emit(true)
++        return true
+     }
+ 
+     private suspend fun getLaunchersToKill(): List<String> {
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/UpdateRepository.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/UpdateRepository.kt
+index b50cfeb..a4d0de0 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/UpdateRepository.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/repositories/UpdateRepository.kt
+@@ -38,6 +38,7 @@ class UpdateRepositoryImpl(
+         .create(GitHubService::class.java)
+ 
+     override suspend fun getUpdate(currentTag: String): Release? = withContext(Dispatchers.IO) {
++        if(!BuildConfig.APP_UPDATE_CHECK_ENABLED) return@withContext null
+         if(!settingsRepository.updateCheckEnabled.get()) return@withContext null
+         val releasesResponse = try {
+             gitHubService.getReleases().execute()
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerAccessibiltyService.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerAccessibiltyService.kt
+index be6ced5..d16ddff 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerAccessibiltyService.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerAccessibiltyService.kt
+@@ -1,5 +1,6 @@
+ package com.kieronquinn.app.smartspacer.service
+ 
++import com.kieronquinn.app.smartspacer.utils.extensions.isRomBackgroundManaged
+ import android.app.NotificationManager
+ import android.content.Context
+ import android.view.accessibility.AccessibilityEvent
+@@ -15,7 +16,8 @@ class SmartspacerAccessibiltyService: LifecycleAccessibilityService() {
+ 
+     companion object {
+         fun isRunning(context: Context): Boolean {
+-            return SmartspacerBackgroundService.isUsingEnhancedModeAppListener ||
++            return context.isRomBackgroundManaged() ||
++                    SmartspacerBackgroundService.isUsingEnhancedModeAppListener ||
+                     context.isServiceRunning(SmartspacerAccessibiltyService::class.java)
+         }
+     }
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerBackgroundService.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerBackgroundService.kt
+index c3e5126..e1a7b55 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerBackgroundService.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerBackgroundService.kt
+@@ -40,6 +40,7 @@ import com.kieronquinn.app.smartspacer.utils.extensions.lockscreenShowing
+ import com.kieronquinn.app.smartspacer.utils.extensions.runningApp
+ import com.kieronquinn.app.smartspacer.utils.extensions.sendBroadcast
+ import com.kieronquinn.app.smartspacer.utils.extensions.startForeground
++import com.kieronquinn.app.smartspacer.utils.extensions.isRomBackgroundManaged
+ import com.kieronquinn.app.smartspacer.utils.extensions.whenCreated
+ import kotlinx.coroutines.flow.SharingStarted
+ import kotlinx.coroutines.flow.combine
+@@ -119,13 +120,18 @@ class SmartspacerBackgroundService: LifecycleService() {
+ 
+     override fun onCreate() {
+         super.onCreate()
+-        startForeground(NotificationId.BACKGROUND_SERVICE, createNotification())
++        startForeground(NotificationId.BACKGROUND_SERVICE) { createNotification() }
+         setupOemSessions()
+         setupOemVisibility()
+         setupEnhancedModeAppListenerIfPossible()
+         setupDarkModeListener()
+     }
+ 
++    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
++        val result = super.onStartCommand(intent, flags, startId)
++        return if (isRomBackgroundManaged()) START_STICKY else result
++    }
++
+     override fun onDestroy() {
+         notifications.cancelNotification(NotificationId.BACKGROUND_SERVICE)
+         isUsingEnhancedModeAppListener = false
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerManagerService.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerManagerService.kt
+index 245a8a5..7d3694b 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerManagerService.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerManagerService.kt
+@@ -25,7 +25,7 @@ class SmartspacerManagerService: Service() {
+ 
+     override fun onCreate() {
+         super.onCreate()
+-        startForeground(NotificationId.MANAGER_SERVICE, createNotification())
++        startForeground(NotificationId.MANAGER_SERVICE) { createNotification() }
+     }
+ 
+     override fun onDestroy() {
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerMinusOneService.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerMinusOneService.kt
+index f7acb7e..2787921 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerMinusOneService.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerMinusOneService.kt
+@@ -25,7 +25,7 @@ class SmartspacerMinusOneService: LifecycleService() {
+ 
+     override fun onCreate() {
+         super.onCreate()
+-        startForeground(NotificationId.MINUS_ONE_SERVICE, createNotification())
++        startForeground(NotificationId.MINUS_ONE_SERVICE) { createNotification() }
+         overlaysController = OverlayController()
+     }
+ 
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerNotificationWidgetService.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerNotificationWidgetService.kt
+index aae1f01..bf3c1a3 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerNotificationWidgetService.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerNotificationWidgetService.kt
+@@ -133,7 +133,7 @@ class SmartspacerNotificationWidgetService: LifecycleService() {
+ 
+     override fun onCreate() {
+         super.onCreate()
+-        startForeground(NotificationId.NOTIFICATION_SERVICE, createNotification())
++        startForeground(NotificationId.NOTIFICATION_SERVICE) { createNotification() }
+         setupResumeState()
+         setupState()
+     }
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerSmartspaceService.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerSmartspaceService.kt
+index c081b9b..47b6b5f 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerSmartspaceService.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/service/SmartspacerSmartspaceService.kt
+@@ -499,7 +499,7 @@ class SmartspacerSmartspaceService : LifecycleSmartspaceService() {
+ 
+     override fun onCreate() {
+         super.onCreate()
+-        startForeground(NotificationId.NATIVE_SERVICE, createNotification())
++        startForeground(NotificationId.NATIVE_SERVICE) { createNotification() }
+         notifications.cancelNotification(NotificationId.NATIVE_MODE)
+         systemSmartspace.notifyServiceRunning()
+         setHasUsedSetting()
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/base/settings/BaseSettingsAdapter.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/base/settings/BaseSettingsAdapter.kt
+index 1064bf1..964592c 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/base/settings/BaseSettingsAdapter.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/base/settings/BaseSettingsAdapter.kt
+@@ -197,10 +197,12 @@ abstract class BaseSettingsAdapter(
+ 
+     private fun GenericViewHolder.Switch.setup(item: GenericSettingsItem.Switch) = with(binding) {
+         itemSettingsSwitchSwitch.text = item.text
++        itemSettingsSwitchSwitch.isEnabled = item.isEnabled
+         var isChecked = item.enabled
+         itemSettingsSwitchSwitch.isChecked = isChecked
+         whenResumed {
+             binding.itemSettingsSwitchSwitch.onClicked().collect {
++                if (!item.isEnabled) return@collect
+                 isChecked = !isChecked
+                 itemSettingsSwitchSwitch.isChecked = isChecked
+                 item.onChanged(isChecked)
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/configuration/accessibility/ConfigurationAccessibilityEnableFragment.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/configuration/accessibility/ConfigurationAccessibilityEnableFragment.kt
+index eb66fd1..5aca102 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/configuration/accessibility/ConfigurationAccessibilityEnableFragment.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/configuration/accessibility/ConfigurationAccessibilityEnableFragment.kt
+@@ -2,6 +2,7 @@ package com.kieronquinn.app.smartspacer.ui.screens.configuration.accessibility
+ 
+ import android.annotation.SuppressLint
+ import android.app.Activity
++import com.kieronquinn.app.smartspacer.utils.extensions.isRomBackgroundManaged
+ import android.content.Intent
+ import android.net.Uri
+ import android.os.Bundle
+@@ -41,6 +42,11 @@ class ConfigurationAccessibilityEnableFragment: BoundFragment<FragmentConfigurat
+ 
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+         super.onViewCreated(view, savedInstanceState)
++        if (requireContext().isRomBackgroundManaged()) {
++            requireActivity().setResult(Activity.RESULT_OK)
++            requireActivity().finish()
++            return
++        }
+         setupInsets()
+         setupToolbar()
+         setupRestrictedCard()
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/configuration/widget/WidgetConfigurationViewModel.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/configuration/widget/WidgetConfigurationViewModel.kt
+index c85e796..3c2439c 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/configuration/widget/WidgetConfigurationViewModel.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/configuration/widget/WidgetConfigurationViewModel.kt
+@@ -120,7 +120,7 @@ class WidgetConfigurationViewModelImpl(
+     }
+ 
+     private val hasGrantedAccessibility = resumeBus.mapLatest {
+-        context.isServiceRunning(SmartspacerAccessibiltyService::class.java)
++        SmartspacerAccessibiltyService.isRunning(context)
+     }
+ 
+     private val isLockScreenAvailable = combine(
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/EnhancedModeFragment.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/EnhancedModeFragment.kt
+index 90b88a4..ef4778b 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/EnhancedModeFragment.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/EnhancedModeFragment.kt
+@@ -109,7 +109,8 @@ class EnhancedModeFragment: BoundFragment<FragmentEnhancedModeBinding>(FragmentE
+             GenericSettingsItem.Switch(
+                 enabled,
+                 getSwitchText(),
+-                ::onSwitchChanged
++                ::onSwitchChanged,
++                isEnabled = false
+             ),
+             GenericSettingsItem.Card(
+                 ContextCompat.getDrawable(requireContext(), R.drawable.ic_info),
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/EnhancedModeViewModel.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/EnhancedModeViewModel.kt
+index 4b830be..8e6944c 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/EnhancedModeViewModel.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/EnhancedModeViewModel.kt
+@@ -56,21 +56,12 @@ class EnhancedModeViewModelImpl(
+     override val state = combine(
+         enabled.asFlow(),
+         reloadBus
+-    ) { enabled, _ ->
+-        State.Loaded(enabled, compatibilityRepository.getCompatibilityState(true))
++    ) { _, _ ->
++        State.Loaded(true, compatibilityRepository.getCompatibilityState(true))
+     }.stateIn(vmScope, SharingStarted.Eagerly, State.Loading)
+ 
+     override fun onSwitchClicked(context: Context, isSetup: Boolean) {
+-        vmScope.launch {
+-            if(enabled.get()){
+-                disable(context)
+-            }else{
+-                //Force set the switch back to disabled
+-                reloadBus.emit(System.currentTimeMillis())
+-                //Navigate to the check page
+-                enable(isSetup)
+-            }
+-        }
++        // ROM integration keeps enhanced mode enabled.
+     }
+ 
+     override fun onSkipClicked() {
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/request/EnhancedModeRequestViewModel.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/request/EnhancedModeRequestViewModel.kt
+index d28e658..f2e3bee 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/request/EnhancedModeRequestViewModel.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/enhancedmode/request/EnhancedModeRequestViewModel.kt
+@@ -53,32 +53,10 @@ class EnhancedModeRequestViewModelImpl(
+ 
+     private val packageManager = context.packageManager
+ 
+-    override val state = shizukuServiceRepository.isReady.mapLatest {
+-        val result = shizukuServiceRepository.runWithService {
+-            it.ping()
+-        }
+-        val state = when(result){
+-            is ShizukuServiceResponse.Success -> {
+-                settings.enhancedMode.set(true)
+-                State.Result(true)
+-            }
+-            is ShizukuServiceResponse.Failed -> {
+-                settings.enhancedMode.set(false)
+-                when {
+-                    result.reason == FailureReason.PERMISSION_DENIED -> {
+-                        State.Result(false)
+-                    }
+-                    isShizukuInstalled() -> {
+-                        State.StartShizuku
+-                    }
+-                    else -> {
+-                        State.Info
+-                    }
+-                }
+-            }
+-        }
+-        state
+-    }.flowOn(Dispatchers.IO).stateIn(vmScope, SharingStarted.Eagerly, State.Requesting)
++    override val state = kotlinx.coroutines.flow.flow<EnhancedModeRequestViewModel.State> {
++        settings.enhancedMode.set(true)
++        emit(EnhancedModeRequestViewModel.State.Result(true))
++    }.stateIn(vmScope, SharingStarted.Eagerly, EnhancedModeRequestViewModel.State.Requesting)
+ 
+     private fun isShizukuInstalled(): Boolean {
+         return packageManager.isPackageInstalled(ShizukuProvider.MANAGER_APPLICATION_ID)
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/native/NativeModeFragment.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/native/NativeModeFragment.kt
+index 83d3b61..19b4592 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/native/NativeModeFragment.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/native/NativeModeFragment.kt
+@@ -211,7 +211,8 @@ class NativeModeFragment: BoundFragment<FragmentNativeBinding>(FragmentNativeBin
+                 binding.nativeSwitch.isVisible = state.shizukuReady
+                 binding.nativeLoaded.isVisible = state.shizukuReady
+                 binding.nativeShizukuError.isVisible = !state.shizukuReady
+-                binding.nativeSwitch.isChecked = state.isEnabled
++                binding.nativeSwitch.isChecked = true
++                binding.nativeSwitch.isEnabled = false
+                 binding.nativeSwitchContent.text = state.compatibility.getContent()
+                 adapter.items = state.compatibility
+                 adapter.notifyDataSetChanged()
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/native/NativeModeViewModel.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/native/NativeModeViewModel.kt
+index 709dcb0..5b159f1 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/native/NativeModeViewModel.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/native/NativeModeViewModel.kt
+@@ -66,7 +66,7 @@ class NativeModeViewModelImpl(
+         systemSmartspaceRepository.serviceRunning,
+         shizukuServiceRepository.isReady
+     ) { compat, running, ready ->
+-        val isEnhancedEnabled = settingsRepository.enhancedMode.getSync() && compat.isNotEmpty()
++        val isEnhancedEnabled = compat.isNotEmpty()
+         if(isEnhancedEnabled) {
+             State.Loaded(ready, running, compat)
+         }else{
+@@ -75,16 +75,7 @@ class NativeModeViewModelImpl(
+     }.stateIn(vmScope, SharingStarted.Eagerly, State.Loading)
+ 
+     override fun onSwitchClicked() {
+-        vmScope.launch {
+-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@launch
+-            val isRunning = (state.value as? State.Loaded)?.isEnabled ?: return@launch
+-            if(isRunning){
+-                systemSmartspaceRepository.resetService()
+-                settingsRepository.hasUsedNativeMode.set(false)
+-            }else{
+-                systemSmartspaceRepository.setService()
+-            }
+-        }
++        // The ROM routes Smartspace sessions to Smartspacer permanently.
+     }
+ 
+     override fun onOpenShizukuClicked(context: Context, isSetup: Boolean) {
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/settings/SettingsFragment.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/settings/SettingsFragment.kt
+index c3aa568..eeb996a 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/settings/SettingsFragment.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/settings/SettingsFragment.kt
+@@ -168,13 +168,13 @@ class SettingsFragment: BaseSettingsFragment(), Root, CanShowSnackbar {
+             ContextCompat.getDrawable(requireContext(), R.drawable.ic_settings_battery_saver),
+             onClick = viewModel::onBatteryOptimisationClicked,
+         ),
+-        SwitchSetting(
++        if (com.kieronquinn.app.smartspacer.BuildConfig.APP_UPDATE_CHECK_ENABLED) SwitchSetting(
+             checkForUpdates,
+             getString(R.string.settings_enable_update_check_title),
+             getString(R.string.settings_enable_update_check_content),
+             ContextCompat.getDrawable(requireContext(), R.drawable.ic_updates),
+             onChanged = viewModel::onCheckForUpdatesChanged
+-        ),
++        ) else null,
+         SwitchSetting(
+             enableAnalytics,
+             getString(R.string.settings_enable_analytics_title),
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/setup/widget/SetupWidgetFragment.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/setup/widget/SetupWidgetFragment.kt
+index 8acab23..76676b2 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/setup/widget/SetupWidgetFragment.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/ui/screens/setup/widget/SetupWidgetFragment.kt
+@@ -152,7 +152,7 @@ class SetupWidgetFragment: BoundFragment<FragmentSetupWidgetFragmentBinding>(Fra
+     }
+ 
+     private fun isServiceRunning(): Boolean {
+-        return requireContext().isServiceRunning(SmartspacerAccessibiltyService::class.java)
++        return SmartspacerAccessibiltyService.isRunning(requireContext())
+     }
+ 
+     private inner class WidgetPinCallback: BroadcastReceiver() {
+@@ -160,7 +160,7 @@ class SetupWidgetFragment: BoundFragment<FragmentSetupWidgetFragmentBinding>(Fra
+         override fun onReceive(context: Context, intent: Intent) {
+             viewModel.onWidgetAdded(context)
+             shouldShowAccessibility =
+-                !context.isServiceRunning(SmartspacerAccessibiltyService::class.java)
++                !SmartspacerAccessibiltyService.isRunning(context)
+         }
+ 
+     }
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Context.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Context.kt
+index 9733b3b..eef0797 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Context.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Context.kt
+@@ -313,7 +313,7 @@ fun Context.getNotificationListenerIntent(notificationListener: Class<out Notifi
+ @Suppress("deprecation")
+ fun Context.isServiceRunning(serviceClass: Class<out Service>): Boolean {
+     if(serviceClass == SmartspacerAccessibiltyService::class.java &&
+-        SmartspacerBackgroundService.isUsingEnhancedModeAppListener) {
++        (isRomBackgroundManaged() || SmartspacerBackgroundService.isUsingEnhancedModeAppListener)) {
+         //Bypass need to enable accessibility
+         return true
+     }
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Crashlytics.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Crashlytics.kt
+index a058ddd..5b9a5ac 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Crashlytics.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Crashlytics.kt
+@@ -5,6 +5,8 @@ import com.google.firebase.crashlytics.FirebaseCrashlytics
+ fun logNonFatal(exception: Exception) {
+     try {
+         FirebaseCrashlytics.getInstance().recordException(exception)
++    }catch (e: IllegalStateException){
++        //Local ROM builds may not configure a Firebase project.
+     }catch (e: NullPointerException){
+         //Crashlytics is disabled
+     }
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+IActivityTaskManager.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+IActivityTaskManager.kt
+index 02bfd0e..4fcae9d 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+IActivityTaskManager.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+IActivityTaskManager.kt
+@@ -26,4 +26,7 @@ private fun IActivityTaskManager.onTasksChanged(): Flow<Unit> = callbackFlow {
+     awaitClose {
+         unregisterTaskStackListener(listener)
+     }
+-}.debounce(250L)
+\ No newline at end of file
++}.debounce(250L)
++fun IActivityTaskManager.getForegroundPackage() = onTasksChanged().mapLatest {
++    getTasks(1, false, false, 0).firstOrNull()?.topActivity?.packageName ?: ""
++}.flowOn(Dispatchers.IO)
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Service.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Service.kt
+index eebcfa4..2215d0b 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Service.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/utils/extensions/Extensions+Service.kt
+@@ -3,19 +3,33 @@ package com.kieronquinn.app.smartspacer.utils.extensions
+ import android.app.Notification
+ import android.app.Service
+ import android.content.pm.ServiceInfo
++import android.content.Context
++import android.content.pm.ApplicationInfo
++import android.app.NotificationManager
+ import android.os.Build
+ import com.kieronquinn.app.smartspacer.components.notifications.NotificationId
+ 
+-fun Service.startForeground(notificationId: NotificationId, notification: Notification) {
++fun Context.isRomBackgroundManaged(): Boolean {
++    val flags = applicationInfo.flags
++    return flags and ApplicationInfo.FLAG_SYSTEM != 0 &&
++        flags and ApplicationInfo.FLAG_PERSISTENT != 0
++}
++
++fun Service.startForeground(notificationId: NotificationId, notification: () -> Notification) {
++    // Persistent ROM processes are kept alive by ActivityManager; they do not need FGS.
++    if (isRomBackgroundManaged()) {
++        getSystemService(NotificationManager::class.java).cancel(notificationId.ordinal)
++        return
++    }
+     try {
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+             startForeground(
+                 notificationId.ordinal,
+-                notification,
++                notification(),
+                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+             )
+         }else{
+-            startForeground(notificationId.ordinal, notification)
++            startForeground(notificationId.ordinal, notification())
+         }
+     }catch (e: Exception) {
+         //Caches ForegroundServiceStartNotAllowedException on S+ when unable to startForeground
+diff --git a/app/src/main/java/com/kieronquinn/app/smartspacer/workers/SmartspacerUpdateWorker.kt b/app/src/main/java/com/kieronquinn/app/smartspacer/workers/SmartspacerUpdateWorker.kt
+index 4fba011..c86c75f 100644
+--- a/app/src/main/java/com/kieronquinn/app/smartspacer/workers/SmartspacerUpdateWorker.kt
++++ b/app/src/main/java/com/kieronquinn/app/smartspacer/workers/SmartspacerUpdateWorker.kt
+@@ -83,6 +83,7 @@ class SmartspacerUpdateWorker(
+     }
+ 
+     private fun isUpdateCheckEnabled(): Boolean {
++        if(!com.kieronquinn.app.smartspacer.BuildConfig.APP_UPDATE_CHECK_ENABLED) return false
+         if(!NotificationChannel.UPDATES.isEnabled(applicationContext)) return false
+         if(!settingsRepository.updateCheckEnabled.getSync()) return false
+         return true
+diff --git a/systemstubs/src/main/java/android/app/IActivityTaskManager.java b/systemstubs/src/main/java/android/app/IActivityTaskManager.java
+index f9d93b4..a3aec15 100644
+--- a/systemstubs/src/main/java/android/app/IActivityTaskManager.java
++++ b/systemstubs/src/main/java/android/app/IActivityTaskManager.java
+@@ -11,6 +11,8 @@ public interface IActivityTaskManager {
+         }
+     }
+ 
++    java.util.List<ActivityManager.RunningTaskInfo> getTasks(int maxNum, boolean filterOnlyVisibleRecents, boolean keepIntentExtra, int displayId);
++
+     void registerTaskStackListener(ITaskStackListener listener);
+     void unregisterTaskStackListener(ITaskStackListener listener);
+ 

@@ -9,6 +9,7 @@ android_app_import {
     },
     required: [
         "privapp-permissions-smartspacer.xml",
+        "smartspacer-sysconfig.xml",
     ],
     optional_uses_libs: [
         "androidx.window.extensions",
@@ -20,5 +21,12 @@ prebuilt_etc {
     name: "privapp-permissions-smartspacer.xml",
     sub_dir: "permissions",
     src: "privapp-permissions-smartspacer.xml",
+    product_specific: true,
+}
+
+prebuilt_etc {
+    name: "smartspacer-sysconfig.xml",
+    sub_dir: "sysconfig",
+    src: "smartspacer-sysconfig.xml",
     product_specific: true,
 }
