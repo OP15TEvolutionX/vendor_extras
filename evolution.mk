@@ -240,3 +240,8 @@ PRODUCT_COPY_FILES += \
 
 PRODUCT_PRODUCT_PROPERTIES += \
     persist.sys.ax_emoji_style=android
+
+# Smartspacer uses the Google SystemUI Smartspace providers on lockscreen and AOD.
+PRODUCT_PACKAGES += \
+    Smartspacer \
+    SystemUIGoogle
