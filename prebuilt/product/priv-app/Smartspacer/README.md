@@ -72,3 +72,13 @@ saved enhanced mode is enabled when preferences load. Other switches keep their
 normal behavior. Source changes are included in rom-integration.patch.
 This APK supersedes the one in the OTA documented above; that already-built
 ZIP remains the previous build and must be rebuilt to include these controls.
+
+## Hidden controls and opt-in runtime permissions (2026-10-04)
+
+APK versionName 9.99.99 / versionCode 1000002 hides both mode switches while
+keeping native/enhanced integration enabled. The accompanying frameworks/base
+DefaultPermissionGrantPolicy exception skips automatic runtime grants for
+Smartspacer and removes previous SYSTEM_FIXED/GRANTED_BY_DEFAULT flags. Previous
+automatic grants are revoked unless user/policy decisions exist. Signature and
+privileged integration permissions remain. A newly built ROM is required for
+the permission policy; replacing only the APK cannot change existing grants.
