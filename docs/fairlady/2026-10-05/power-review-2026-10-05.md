@@ -1,0 +1,36 @@
+# Ревью энергопотребления EvolutionX / fairlady
+Дата: 5 октября 2026. OnePlus 15T / SM8850, canoe_perf, Linux 6.12.
+Проверены исходники и конфигурация, извлечённая из собранного KERNEL_OBJ/Image. Телефон отсутствует в adb devices. Реальный расход, runtime-состояние и установленная сборка не проверены. Код прошивки не изменялся.
+
+## Подтверждённые находки
+1. P2: Idle Manager включён по умолчанию и планирует до двух пробуждающих scan на screen-off цикл даже при пустом списке приложений. Первый — через 30 секунд, второй — к таймауту; screen-on отменяет цикл. LunarisIdleManager.java:262–286,401–418,460–478,934–955. Улучшение: не запускать scan без применимых целей, отменять при очистке списка.
+2. P2: isAppIdleLongEnough повторяет queryAndAggregateUsageStats для каждого пакета, хотя запрос возвращает общую статистику. До N общих запросов на N подходящих целей под ScanLock. LunarisIdleManager.java:510–535,795–821. Сделать один снимок на scan. Wakelock имеет timeout 3 минуты и finally-release: это не означает постоянное трёхминутное удержание.
+3. P2: Kernel Manager ожидает init.svc.qcom-post-boot, но governor/min_freq задаёт kernel-post-boot при sys.boot_completed. Задержка две секунды не гарантирует завершение нужной службы. Сохранённые настройки могут перезаписаться. AxKernelManagerService.java:65–84; proprietary/vendor/etc/init/hw/init.qti.kernel.rc:152–167. Синхронизировать с kernel-post-boot и vendor.post_boot.parsed, обрабатывать таймаут явно.
+4. Пробел Power HAL: LOW_POWER/DEVICE_IDLE/DISPLAY_INACTIVE не поддерживаются. Подключённое power-ext-oplus реализует только DOUBLE_TAP_TO_WAKE. Power.cpp:111–120,142–168; hardware/oplus/power/power-mode.cpp. Framework Battery Saver/Doze работают, но отдельной реакции CPU/GPU HAL на эти режимы нет. INTERACTIVE корректно направляет display on/off в Qualcomm perf HAL, ресурсы есть в perfboostsconfig.xml:535–550. Новые hints разрабатывать с платформенными ресурсами и замерами.
+5. SUSTAINED_PERFORMANCE объявлен поддерживаемым, но setMode передаёт NULL независимо от enabled, а hint 0x1206 имеет пустые ресурсы. Привести объявленную поддержку в соответствие с реализацией.
+
+## Ядро
+CONFIG_SUSPEND, PM_SLEEP, CPU_IDLE, NO_HZ_IDLE, ENERGY_MODEL, UCLAMP_TASK включены; HZ=250. Default governor schedutil; vendor post-boot выбирает walt, если WALT доступен, иначе schedutil. Для 6+2 фон ограничен CPU0–5, sched_boost сбрасывается, prime min_cpus=0. sleep_disabled=N и mem_sleep=s2idle предусмотрены. s2idle само по себе не означает сломанный deep sleep; успешность записей и residency надо проверить на телефоне.
+CPU floor для 6+2: policy0 614.4/787.2 MHz в зависимости от ревизии, policy6 864 MHz, input boost 864 MHz/100 ms, CPU0 core_ctl min_cpus=4. Это кандидаты для A/B, не доказанный расход в suspend: онлайн CPU может быть в idle.
+CONFIG_KASAN_HW_TAGS=y, software KASAN выключен; kasan.stacktrace=off, stack_depot_disable=on. Аппаратный KASAN предназначен также для production и имеет относительно низкие накладные расходы. Отключать без замера не рекомендую: https://docs.kernel.org/dev-tools/kasan.html.
+SCHEDSTATS/FTRACE и debug/test-модули присутствуют. Наличие не доказывает активную трассировку; проверить tracing_on, events и telemetry параметры. Базовые механизмы экономии есть, полная корректность ядра без runtime не доказана.
+
+## Потенциальные источники и ограничения
+Kernel Manager не переписывает sysfs непрерывно. Метрики опрашиваются раз в 2 секунды только в Lifecycle.STARTED экрана настроек. Высокий пользовательский min_freq или performance governor с apply-on-boot — риск настройки.
+Full Kill обходит foreground/media защиту выбранного пакета; onUidGone тоже переводит цель в stopped вне screen-off таймаута. Риск потери уведомлений, фоновых звонков, будильников. Список защищённых пакетов ограничен. KILL_BACKGROUND не запрещает перезапуск; выигрыша в батарее по одному счётчику убийств установить нельзя.
+OplusDoze PickupSensor по tilt detector может полностью будить экран; debounce 2.5 секунды, wakelock 300 ms. Сравнить off/pulse/wake и проверить фактический wake-up sensor. DozeService отключает listener на SCREEN_ON только если текущая настройка жеста включена: при выключении одного жеста, пока другой держит службу активной, listener может остаться. Улучшить безусловное снятие listeners на SCREEN_ON, reconciliation при изменениях и закрытие executor при уничтожении.
+Framework PocketService отключён fairlady overlay config_pocketModeSupported=false; его proximity/light listeners не следует считать текущим потребителем. pocket_sensor_type OplusDoze в проверенных ресурсах пустой. AOD и pickup по умолчанию выключены; текущие настройки неизвестны.
+Экран: общий default peak 120 Hz, SF idle timer 80 ms; проверить реальную частоту статичного контента. Модем/5G/DSDS, GMS, сторонние приложения и Wi-Fi требуют runtime-данных. power_profile.xml содержит CPU 6+2 и capacity 7500 mAh; модель атрибуции не управляет governor и требует проверки на реальном SKU.
+
+## Замеры
+Снять начальный и конечный dumpsys battery/batterystats/power/deviceidle/alarm/jobscheduler/sensorservice, suspend control (имя узнать через dumpsys -l), SurfaceFlinger/display. Сохранить fingerprint, uname, cmdline, SoC/revision, governors/min/max, состояния post-boot служб. При доступе: wakeup_sources, suspend_stats, Qualcomm sleep stats, time_in_state, KGSL, tracing_on. Ошибка доступа — ограничение, не нулевая активность.
+Основной интервал 6–8 часов screen-off без зарядки, без постоянного ADB polling; отключать USB между снимками. Одинаковые сигнал/SIM/Wi-Fi/AOD/температура/приложения. Не форсировать Doze в baseline и не сбрасывать существующую статистику для первого обзора.
+Расход: %/час; при корректном charge_counter I_avg[mA]=(Q_start[µAh]-Q_end[µAh])/(1000*часы). Проверить единицы fuel gauge. Мгновенный current_now не заменяет средний ток. Сопоставлять расход с suspend residency, CPU awake, wakelocks, wakeup alarms, modem и sensor activity.
+A/B: Idle Manager off/on, pickup off/on, Wi-Fi/мобильная сеть, Battery Saver off/on. Затем исправления 1–3; после них эксперименты CPU floor/boost с проверкой плавности, нагрева, уведомлений.
+Приоритет: устранить пустые scan и повторные UsageStats, исправить post-boot синхронизацию, измерить сон, затем дорабатывать Power HAL. Проценты экономии пока неизвестны.
+
+## Дополнение после исправления Kernel Manager
+Ожидание kernel-post-boot и vendor.post_boot.parsed реализовано. При таймауте 30 секунд controls доступны, но сохранённые значения автоматически не применяются; настройки не удаляются. Для устройств без kernel-post-boot сохранён прежний путь. Пройдены 30 service, 10 sysfs и 9 metric host-проверок, в том числе running/restarting нужной службы при остановленном qcom-post-boot, таймаут и неуспешный parsed-флаг. Сборка services проверяется отдельно.
+Дополнительная находка pickup: Android tilt detector стандартно сообщает 1, overlay OplusDoze ожидает 0. Нужна проверка реальных событий vendor HAL; значение автоматически не менялось. Документация: https://source.android.com/docs/core/interaction/sensors/sensor-types#tilt_detector.
+
+Верификация исправления завершена: services и selinux_policy собраны успешно. Добавлено get_prop(system_server, vendor_mpctl_prop) для чтения vendor.post_boot.parsed. Полный OTA не собирался и на устройство не устанавливался.

@@ -1,0 +1,197 @@
+[
+  {
+    "path": "build/soong",
+    "remote": "op15t-evo",
+    "url": "https://github.com/OP15TEvolutionX/build_soong",
+    "head": "75e6eb3a47bf1d936743a85c55f823d2123c6059",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "device/oneplus/fairlady",
+    "remote": "op15t-devices",
+    "url": "https://github.com/OP15T-SM8850-Development/android_device_oneplus_fairlady",
+    "head": "f33244c1a560c33c3469aa29993afb73b95d4943",
+    "matching_github_refs": [
+      "refs/heads/lineage-24.0-staging"
+    ]
+  },
+  {
+    "path": "device/oneplus/sm8850-common",
+    "remote": "op15t-devices",
+    "url": "https://github.com/OP15T-SM8850-Development/android_device_oneplus_sm8850-common",
+    "head": "62e7ddf175c522eee7bfb56ad24c8a521c187892",
+    "matching_github_refs": [
+      "refs/heads/lineage-24.0-staging"
+    ]
+  },
+  {
+    "path": "frameworks/base",
+    "remote": "op15t",
+    "url": "https://github.com/OP15TEvolutionX/frameworks_base.git",
+    "head": "20e802bc0976321347e40b011c3092be7c89ff89",
+    "matching_github_refs": [
+      "refs/heads/EvolutionX-17"
+    ]
+  },
+  {
+    "path": "hardware/oplus",
+    "remote": "op15t-devices",
+    "url": "https://github.com/OP15T-SM8850-Development/android_hardware_oplus",
+    "head": "54cbf11c96d0a6275a6121152a20baea31822db3",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/lineage-24.0"
+    ]
+  },
+  {
+    "path": "packages/apps/Evolver",
+    "remote": "op15t-evo",
+    "url": "https://github.com/OP15TEvolutionX/packages_apps_Evolver",
+    "head": "cdf0bea471115d2d191b0cd198826841031d9dec",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "packages/apps/Settings",
+    "remote": "op15t",
+    "url": "https://github.com/OP15TEvolutionX/packages_apps_Settings.git",
+    "head": "0c97255745a88c9fdb91eb5049440b846bd38ef3",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "packages/features/KernelManager",
+    "remote": "op15t-evo",
+    "url": "https://github.com/OP15TEvolutionX/android_packages_features_KernelManager",
+    "head": "63e21254ebb6c8f1063df4765cf1885add43cc88",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "packages/features/Routines",
+    "remote": "op15t-evo",
+    "url": "https://github.com/OP15TEvolutionX/android_packages_features_Routines",
+    "head": "02d9e75b5134a60495dcdbf564bc00f48b085b87",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "packages/modules/Bluetooth",
+    "remote": "op15t-evo",
+    "url": "https://github.com/OP15TEvolutionX/packages_modules_Bluetooth",
+    "head": "d763a485112e2d88a6f3740a6bda76b68dd20878",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "system/sepolicy",
+    "remote": "op15t",
+    "url": "https://github.com/OP15TEvolutionX/system_sepolicy.git",
+    "head": "9127ccc576c00dda35d23dbf41225665db85cea6",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "vendor/extras",
+    "remote": "op15t",
+    "url": "https://github.com/OP15TEvolutionX/vendor_extras.git",
+    "head": "a840cb9084b3999ce422b2a4c0018496c16caf67",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "vendor/google/apps/SettingsGoogle",
+    "remote": "op15t-evo",
+    "url": "https://github.com/OP15TEvolutionX/vendor_google_apps_SettingsGoogle",
+    "head": "28bc323a1ed78b82619e17feb209b69aa38685e3",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "vendor/lineage",
+    "remote": "op15t",
+    "url": "https://github.com/OP15TEvolutionX/vendor_evolution.git",
+    "head": "3caa11d1a35af9243cc5cdd934004007c694a4c5",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "vendor/oneplus/fairlady",
+    "remote": "op15t-devices",
+    "url": "https://github.com/OP15T-SM8850-Development/proprietary_vendor_oneplus_fairlady",
+    "head": "d937e2dcf300a98e837b3d5764bab2f04fb0f256",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/lineage-24.0"
+    ]
+  },
+  {
+    "path": "vendor/oneplus/sm8850-common",
+    "remote": "op15t-devices",
+    "url": "https://github.com/OP15T-SM8850-Development/proprietary_vendor_oneplus_sm8850-common",
+    "head": "558c7f6d4eadaf1b75202fb15e249d6afca023bb",
+    "matching_github_refs": [
+      "refs/heads/lineage-24.0-staging"
+    ]
+  },
+  {
+    "path": "vendor/pixel-style",
+    "remote": "op15t",
+    "url": "https://github.com/OP15TEvolutionX/vendor_pixel-style.git",
+    "head": "9d2bd8022a8d1eaa0f6bffe0679a3d19c224408d",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": ".repo/manifests",
+    "remote": "op15t",
+    "url": "https://github.com/OP15TEvolutionX/manifest.git",
+    "head": "49d14d01e7359f3a85e92c539aa6579d1bc85da9",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "packages/features/IdleManager",
+    "remote": "origin",
+    "url": "https://github.com/OP15TEvolutionX/android_packages_features_IdleManager.git",
+    "head": "3a38c70bf0cf7e415fc16a1a936e7a5bfdca44bc",
+    "matching_github_refs": [
+      "HEAD",
+      "refs/heads/cnb"
+    ]
+  },
+  {
+    "path": "vendor/qcom/opensource/power",
+    "remote": "op15t-evo",
+    "url": "https://github.com/OP15TEvolutionX/android_vendor_qcom_opensource_power.git",
+    "head": "c7270e0ec7e037682053a31c600a6435bd22131a",
+    "matching_github_refs": [
+      "refs/heads/lineage-24.0"
+    ]
+  }
+]
