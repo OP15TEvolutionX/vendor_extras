@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the Evolution X fairlady product without stale alternate APKs.
-set -eo pipefail
+set -e
 
 task_script_path="$(readlink -f -- "${BASH_SOURCE[0]}")"
 task_tree_root="$(cd -- "$(dirname -- "$task_script_path")/../../.." && pwd)"
@@ -12,6 +12,7 @@ if [[ ! "$build_jobs" =~ ^[1-9][0-9]*$ ]]; then
 fi
 source build/envsetup.sh
 lunch evolution_fairlady-userdebug
+set -o pipefail
 export _JAVA_OPTIONS="${_JAVA_OPTIONS:--Xmx3g}"
 mkdir -p logs
 build_log="logs/fairlady-$(date +%Y%m%d-%H%M%S).log"
