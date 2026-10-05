@@ -1,0 +1,17 @@
+[
+  {
+    "repo": "vendor/lineage",
+    "sha": "3caa11d1a35af9243cc5cdd934004007c694a4c5",
+    "remote": "https://github.com/OP15TEvolutionX/vendor_evolution.git"
+  },
+  {
+    "repo": "vendor/extras",
+    "sha": "a840cb9084b3999ce422b2a4c0018496c16caf67",
+    "remote": "https://github.com/OP15TEvolutionX/vendor_extras.git"
+  },
+  {
+    "repo": "vendor/pixel-style",
+    "sha": "9d2bd8022a8d1eaa0f6bffe0679a3d19c224408d",
+    "remote": "https://github.com/OP15TEvolutionX/vendor_pixel-style.git"
+  }
+]

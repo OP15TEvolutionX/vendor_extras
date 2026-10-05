@@ -1,0 +1,38 @@
+[
+  {
+    "path": "packages/features/IdleManager",
+    "remote": "origin",
+    "branch": "cnb",
+    "sha": "3a38c70bf0cf7e415fc16a1a936e7a5bfdca44bc"
+  },
+  {
+    "path": "packages/features/KernelManager",
+    "remote": "op15t-evo",
+    "branch": "cnb",
+    "sha": "63e21254ebb6c8f1063df4765cf1885add43cc88"
+  },
+  {
+    "path": "vendor/qcom/opensource/power",
+    "remote": "op15t-evo",
+    "branch": "lineage-24.0",
+    "sha": "c7270e0ec7e037682053a31c600a6435bd22131a"
+  },
+  {
+    "path": "hardware/oplus",
+    "remote": "op15t-devices",
+    "branch": "lineage-24.0",
+    "sha": "54cbf11c96d0a6275a6121152a20baea31822db3"
+  },
+  {
+    "path": "device/oneplus/fairlady",
+    "remote": "op15t-devices",
+    "branch": "lineage-24.0-staging",
+    "sha": "f33244c1a560c33c3469aa29993afb73b95d4943"
+  },
+  {
+    "path": ".repo/manifests",
+    "remote": "origin",
+    "branch": "cnb",
+    "sha": "49d14d01e7359f3a85e92c539aa6579d1bc85da9"
+  }
+]
