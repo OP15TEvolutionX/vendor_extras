@@ -19,6 +19,7 @@ package com.android.axion.blur
 import android.provider.Settings
 import android.view.View
 import android.view.ViewTreeObserver
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.runtime.Composable
@@ -36,9 +37,11 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -59,11 +62,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.toSize
-import com.android.axion.blur.model.AxBackdropBlurSettingsSpec
-import com.android.axion.blur.ui.view.AxViewBackdropBlur
+import com.android.axion.blur.BlurEngine
+import com.android.axion.blur.settings.AxBackdropBlurSettingsSpec
 import com.android.axion.kotlin.settings.SettingsFlow
 import com.android.axion.kotlin.settings.SettingsType
 import kotlin.math.roundToInt
@@ -88,6 +92,25 @@ object AxBlurSurfaceDefaults {
     fun tintColor(alpha: Float, surfaceColor: Color? = null): Color {
         val tint = tintColor(surfaceColor)
         return tint.copy(alpha = tint.alpha * alpha.coerceIn(0f, 1f))
+    }
+
+    /** Width of the [highlightBrush] rim. */
+    val HighlightWidth: Dp = 1.dp
+
+    /**
+     * Specular rim for a glass surface: bright along the top edge and fading toward the bottom,
+     * as if lit from above. It's what separates glass from a flat translucent fill. White in both
+     * themes; a grey outline over a light frost reads as a dirty edge instead.
+     */
+    @Composable
+    fun highlightBrush(): Brush {
+        val dark = isSystemInDarkTheme()
+        return Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = if (dark) 0.20f else 0.70f),
+                Color.White.copy(alpha = if (dark) 0.04f else 0.15f),
+            ),
+        )
     }
 }
 
@@ -146,6 +169,8 @@ fun AxBlurSurface(
     tintColor: Color? = null,
     settingsSpec: AxBackdropBlurSettingsSpec = AxBackdropBlurSettingsSpec.system(),
     contentAlignment: Alignment = Alignment.TopStart,
+    alpha: Float = 1f,
+    highlight: Brush? = null,
     content: @Composable BoxScope.() -> Unit = {},
 ) {
     val resolvedSurfaceColor = surfaceColor ?: AxBlurSurfaceDefaults.surfaceColor()
@@ -159,6 +184,8 @@ fun AxBlurSurface(
                 tintColor = resolvedTintColor,
                 cornerRadius = cornerRadius,
                 settingsSpec = settingsSpec,
+                alpha = alpha,
+                highlight = highlight,
             ),
         contentAlignment = contentAlignment,
         content = content,
@@ -172,12 +199,15 @@ fun Modifier.axBlurBackground(
     tintColor: Color,
     cornerRadius: Dp = Dp.Unspecified,
     settingsSpec: AxBackdropBlurSettingsSpec = AxBackdropBlurSettingsSpec.system(),
+    alpha: Float = 1f,
+    highlight: Brush? = null,
+    highlightWidth: Dp = AxBlurSurfaceDefaults.HighlightWidth,
 ): Modifier {
     val density = LocalDensity.current
     val view = LocalView.current
     val blurEnabled = LocalAxBlurEnabled.current && enabled
     val blur = remember(view, settingsSpec) {
-        AxViewBackdropBlur(view).apply {
+        BlurEngine(view).apply {
             useSettings(settingsSpec)
             setEnabled(blurEnabled)
         }
@@ -188,12 +218,12 @@ fun Modifier.axBlurBackground(
     } else {
         Float.NaN
     }
+    val surfaceAlpha = alpha.coerceIn(0f, 1f)
+    val blurAlpha = (surfaceAlpha * 255).toInt()
+    val highlightWidthPx = with(density) { highlightWidth.toPx() }
 
     DisposableEffect(blur) {
-        blur.onAttachedToWindow()
-        onDispose {
-            blur.onDetachedFromWindow()
-        }
+        onDispose(blur::dispose)
     }
 
     SideEffect {
@@ -209,8 +239,9 @@ fun Modifier.axBlurBackground(
             size.minDimension * 0.5f
         }
         val drewBlur = if (blurEnabled && width > 0 && height > 0) {
-            var result = false
+            blur.setAlpha(blurAlpha)
             blur.setOverlayColor(tintArgb)
+            var result = false
             drawIntoCanvas { canvas ->
                 result = blur.draw(
                     canvas.nativeCanvas,
@@ -225,13 +256,28 @@ fun Modifier.axBlurBackground(
         } else {
             false
         }
-        if (!drewBlur) {
+        if (!drewBlur && surfaceAlpha > 0f) {
+            // Fades with the surface: a caller animating `alpha` out shouldn't leave the opaque
+            // fallback behind on devices without blur.
             drawRoundRect(
                 color = fallbackColor,
                 cornerRadius = CornerRadius(cornerRadiusPx),
+                alpha = surfaceAlpha,
             )
         }
         drawContent()
+        if (highlight != null && surfaceAlpha > 0f && highlightWidthPx > 0f) {
+            // Stroke centred on a rect inset by half its width, so the rim sits inside the clip.
+            val inset = highlightWidthPx / 2f
+            drawRoundRect(
+                brush = highlight,
+                topLeft = Offset(inset, inset),
+                size = Size(size.width - highlightWidthPx, size.height - highlightWidthPx),
+                cornerRadius = CornerRadius((cornerRadiusPx - inset).coerceAtLeast(0f)),
+                style = Stroke(width = highlightWidthPx),
+                alpha = surfaceAlpha,
+            )
+        }
     }
 }
 
